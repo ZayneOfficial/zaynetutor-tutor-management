@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ZayneTutor | Tutor Management</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar" id="sidebar">
+      <div class="brand">
+        <div class="brand-mark">🎓</div>
+        <div>
+          <strong>Zayne<span>Tutor</span></strong>
+          <small>Learn · Improve · Succeed</small>
+        </div>
+      </div>
+
+      <nav class="nav">
+        <button class="nav-link active" data-page="dashboard"><span>⌂</span> Dashboard</button>
+        <button class="nav-link" data-page="students"><span>♟</span> Students</button>
+        <button class="nav-link" data-page="grades"><span>▣</span> Grades</button>
+        <button class="nav-link" data-page="payments"><span>▤</span> Payments</button>
+        <button class="nav-link" data-page="invoices"><span>▧</span> Invoices</button>
+        <button class="nav-link" data-page="reports"><span>▥</span> Reports</button>
+        <button class="nav-link" data-page="settings"><span>⚙</span> Settings</button>
+      </nav>
+
+      <div class="sidebar-quote">“Small steps<br>lead to big results.”</div>
+      <div class="sidebar-footer">Tutor Management System<br><span>Local demo version</span></div>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <button class="mobile-menu" id="mobileMenu">☰</button>
+        <div class="search-wrap">
+          <span>⌕</span>
+          <input id="globalSearch" type="search" placeholder="Search students...">
+        </div>
+        <div class="top-actions">
+          <button class="icon-btn" id="notificationBtn" title="Notifications">🔔<b id="notificationCount">0</b></button>
+          <div class="profile">
+            <div class="avatar">T</div>
+            <div><strong id="tutorNameTop">Tutor</strong><small>Tutor</small></div>
+          </div>
+        </div>
+      </header>
+
+      <section class="content">
+        <div id="page-dashboard" class="page active"></div>
+        <div id="page-students" class="page"></div>
+        <div id="page-grades" class="page"></div>
+        <div id="page-payments" class="page"></div>
+        <div id="page-invoices" class="page"></div>
+        <div id="page-reports" class="page"></div>
+        <div id="page-settings" class="page"></div>
+      </section>
+    </main>
+  </div>
+
+  <div class="modal-backdrop" id="modalBackdrop">
+    <div class="modal" id="modal"></div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+  <script src="app.js"></script>
+</body>
+</html>

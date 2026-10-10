@@ -3,11 +3,34 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Manage tutoring students, grades, payments, invoices, and monthly reports with ZayneTutor.">
+  <meta name="theme-color" content="#053199">
   <title>ZayneTutor | Tutor Management</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <div class="app-shell">
+  <section class="auth-screen" id="authScreen">
+    <div class="auth-card">
+      <div class="brand-mark">🎓</div>
+      <h1>Zayne<span>Tutor</span></h1>
+      <p id="authDescription">Sign in to manage your tutoring business.</p>
+      <div class="auth-error" id="authError" role="alert" hidden></div>
+      <form id="authForm">
+        <div id="authNameField" hidden>
+          <label for="authName">Tutor name</label>
+          <input id="authName" name="name" autocomplete="name" maxlength="120">
+        </div>
+        <label for="authEmail">Email</label>
+        <input id="authEmail" name="email" type="email" autocomplete="email" maxlength="254" required>
+        <label for="authPassword">Password</label>
+        <input id="authPassword" name="password" type="password" autocomplete="current-password" minlength="10" maxlength="72" required>
+        <button class="btn btn-primary" id="authSubmit" type="submit">Sign In</button>
+      </form>
+      <button class="auth-toggle" id="authToggle" type="button">Create a tutor account</button>
+    </div>
+  </section>
+
+  <div class="app-shell" id="appShell" hidden>
     <aside class="sidebar" id="sidebar">
       <div class="brand">
         <div class="brand-mark">🎓</div>
@@ -28,7 +51,7 @@
       </nav>
 
       <div class="sidebar-quote">“Small steps<br>lead to big results.”</div>
-      <div class="sidebar-footer">Tutor Management System<br><span>Local demo version</span></div>
+      <div class="sidebar-footer">Tutor Management System<br><span>Secure account storage</span></div>
     </aside>
 
     <main class="main">
@@ -44,6 +67,7 @@
             <div class="avatar">T</div>
             <div><strong id="tutorNameTop">Tutor</strong><small>Tutor</small></div>
           </div>
+          <button class="btn btn-sm" id="signOut" type="button">Sign Out</button>
         </div>
       </header>
 

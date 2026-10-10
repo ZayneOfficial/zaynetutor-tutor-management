@@ -1,56 +1,130 @@
 /* ZayneTutor Tutor Management System
-   Front-end/localStorage version. It can later be connected to Node/Express/MySQL.
+   Browser UI backed by the authenticated Node.js API and MySQL.
 */
-const STORAGE = "zaynetutor_manager_v1";
-
-const defaultData = {
-  settings: {
-    tutorName: "Saymore Muchenje",
-    businessName: "ZayneTutor",
-    phone: "",
-    email: "",
-    currency: "R"
-  },
-  students: [
-    {id:101,name:"John Moyo",grade:"7",subject:"Mathematics",phone:"",guardian:"",fee:600,status:"Active"},
-    {id:102,name:"Sarah Dube",grade:"8",subject:"English",phone:"",guardian:"",fee:450,status:"Active"},
-    {id:103,name:"Peter Ncube",grade:"6",subject:"Mathematics",phone:"",guardian:"",fee:800,status:"Active"},
-    {id:104,name:"Mary Sibanda",grade:"9",subject:"Science",phone:"",guardian:"",fee:500,status:"Active"},
-    {id:105,name:"David Moyo",grade:"7",subject:"Mathematics",phone:"",guardian:"",fee:700,status:"Active"},
-    {id:106,name:"Thandiwe Khumalo",grade:"8",subject:"English",phone:"",guardian:"",fee:650,status:"Active"}
-  ],
-  payments: [
-    {id:1,studentId:101,month:"2026-10",amount:600,status:"Paid",date:"2026-10-12",note:""},
-    {id:2,studentId:102,month:"2026-10",amount:450,status:"Paid",date:"2026-10-12",note:""},
-    {id:3,studentId:103,month:"2026-10",amount:0,status:"Unpaid",date:"",note:""},
-    {id:4,studentId:104,month:"2026-10",amount:500,status:"Paid",date:"2026-10-11",note:""},
-    {id:5,studentId:105,month:"2026-10",amount:350,status:"Partial",date:"2026-10-10",note:"Part payment"},
-    {id:6,studentId:106,month:"2026-10",amount:650,status:"Paid",date:"2026-10-10",note:""}
-  ],
-  grades: [
-    {id:1,studentId:101,term:"Term 1",assessment:"Test 1",score:72,max:100,date:"2026-03-10"},
-    {id:2,studentId:101,term:"Term 1",assessment:"Assignment",score:80,max:100,date:"2026-03-25"},
-    {id:3,studentId:101,term:"Term 2",assessment:"Test 1",score:78,max:100,date:"2026-06-12"},
-    {id:4,studentId:101,term:"Term 3",assessment:"Test 1",score:84,max:100,date:"2026-09-15"},
-    {id:5,studentId:102,term:"Term 1",assessment:"Essay",score:75,max:100,date:"2026-03-18"},
-    {id:6,studentId:103,term:"Term 2",assessment:"Test 1",score:82,max:100,date:"2026-06-15"},
-    {id:7,studentId:104,term:"Term 3",assessment:"Project",score:88,max:100,date:"2026-09-20"}
-  ],
-  invoices: []
+const API_BASE = window.ZAYNETUTOR_API_URL || "";
+const TOKEN_KEY = "zaynetutor_token";
+let token = localStorage.getItem(TOKEN_KEY);
+let data = {
+  settings: { tutorName: "Tutor", businessName: "ZayneTutor", phone: "", email: "", currency: "R" },
+  students: [],
+  payments: [],
+  paymentHistory: [],
+  grades: [],
+  invoices: [],
 };
-
-let data = loadData();
 let currentMonth = new Date().toISOString().slice(0,7);
 let currentPage = "dashboard";
+let registering = false;
 
-function loadData(){
-  try{
-    const saved = localStorage.getItem(STORAGE);
-    if(saved) return JSON.parse(saved);
-  }catch(e){}
-  return structuredClone(defaultData);
+async function api(path, options={}){
+  const headers={...(options.body?{"Content-Type":"application/json"}:{}),...(token?{Authorization:`Bearer ${token}`}:{})};
+  const response=await fetch(`${API_BASE}/api${path}`,{...options,headers:{...headers,...options.headers}});
+  const body=await response.text();
+  let result=null;
+  if(body){
+    try{result=JSON.parse(body)}catch{throw new Error(`The server returned an invalid response (${response.status}).`)}
+  }
+  if(response.status===401&&token&&!path.startsWith("/auth/")){
+    signOut();
+    showAuthError("Your session has expired. Sign in again.");
+    throw new Error("Your session has expired. Sign in again.");
+  }
+  if(!response.ok) throw new Error(result?.error||`Request failed (${response.status}).`);
+  return result;
 }
-function save(){ localStorage.setItem(STORAGE, JSON.stringify(data)); }
+async function refreshData(){
+  const [students,grades,payments,paymentHistory,invoices,settings]=await Promise.all([
+    api("/students"),
+    api("/grades"),
+    api(`/payments?month=${encodeURIComponent(currentMonth)}`),
+    api("/payments/history"),
+    api("/invoices"),
+    api("/settings"),
+  ]);
+  data={students:students.students,grades:grades.grades,payments:payments.payments,paymentHistory:paymentHistory.payments,invoices:invoices.invoices,settings:settings.settings};
+}
+async function mutate(action,message,after=()=>{closeModal();renderAll()}){
+  try{
+    await action();
+    await refreshData();
+    after();
+    showToast(message);
+  }catch(error){
+    showToast(error.message);
+  }
+}
+async function changeMonth(month){
+  if(!month)return;
+  currentMonth=month;
+  try{
+    await refreshData();
+    renderAll();
+  }catch(error){
+    showToast(error.message);
+  }
+}
+function showAuthError(message=""){
+  const error=document.getElementById("authError");
+  error.textContent=message;
+  error.hidden=!message;
+}
+function showAuth(){
+  document.getElementById("appShell").hidden=true;
+  document.getElementById("authScreen").hidden=false;
+}
+function showApp(){
+  document.getElementById("authScreen").hidden=true;
+  document.getElementById("appShell").hidden=false;
+}
+function updateAuthMode(){
+  registering=!registering;
+  document.getElementById("authNameField").hidden=!registering;
+  document.getElementById("authName").required=registering;
+  document.getElementById("authPassword").autocomplete=registering?"new-password":"current-password";
+  document.getElementById("authPassword").minLength=registering?10:1;
+  document.getElementById("authSubmit").textContent=registering?"Create Account":"Sign In";
+  document.getElementById("authDescription").textContent=registering?"Create your tutor account to securely store your data.":"Sign in to manage your tutoring business.";
+  document.getElementById("authToggle").textContent=registering?"Already have an account? Sign in":"Create a tutor account";
+  showAuthError();
+}
+async function submitAuth(event){
+  event.preventDefault();
+  showAuthError();
+  const form=new FormData(event.currentTarget);
+  const credentials={email:String(form.get("email")).trim(),password:String(form.get("password"))};
+  if(registering) credentials.name=String(form.get("name")).trim();
+  const button=document.getElementById("authSubmit");
+  button.disabled=true;
+  try{
+    const result=await api(registering?"/auth/register":"/auth/login",{method:"POST",body:JSON.stringify(credentials)});
+    token=result.token;
+    localStorage.setItem(TOKEN_KEY,token);
+    await refreshData();
+    showApp();
+    renderAll();
+  }catch(error){
+    showAuthError(error.message);
+  }finally{
+    button.disabled=false;
+  }
+}
+function signOut(){
+  token=null;
+  localStorage.removeItem(TOKEN_KEY);
+  data={settings:{tutorName:"Tutor",businessName:"ZayneTutor",phone:"",email:"",currency:"R"},students:[],payments:[],paymentHistory:[],grades:[],invoices:[]};
+  showAuth();
+}
+async function initializeApp(){
+  if(!token){showAuth();return}
+  try{
+    await refreshData();
+    showApp();
+    renderAll();
+  }catch(error){
+    showAuth();
+    showAuthError(error.message);
+  }
+}
 function money(n){ return `${data.settings.currency || "R"}${Number(n||0).toLocaleString("en-ZA",{minimumFractionDigits:0,maximumFractionDigits:2})}`; }
 function monthName(m){
   const [y,mo] = m.split("-"); return new Date(Number(y),Number(mo)-1,1).toLocaleString("en-ZA",{month:"long",year:"numeric"});
@@ -103,8 +177,14 @@ function renderDashboard(){
   const ps=paymentsFor().map(p=>({...p,computed:statusFor(p,student(p.studentId))}));
   const paid=ps.filter(p=>p.computed==="Paid").length;
   const rate=active?Math.round((rec/ex)*100):0;
-  const bars=[["Jul","13500","11200"],["Aug","15000","12600"],["Sep","15400","14100"],["Oct",String(ex),String(rec)]];
-  const max=Math.max(...bars.flatMap(x=>[Number(x[1]),Number(x[2])]),1);
+  const [selectedYear,selectedMonth]=currentMonth.split("-").map(Number);
+  const bars=Array.from({length:4},(_,index)=>{
+    const date=new Date(selectedYear,selectedMonth-1-index,1);
+    const month=`${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,"0")}`;
+    const receivedAmount=data.paymentHistory.filter(payment=>payment.month===month).reduce((sum,payment)=>sum+Number(payment.amount||0),0);
+    return {label:date.toLocaleString("en-ZA",{month:"short"}),received:receivedAmount};
+  }).reverse();
+  const max=Math.max(...bars.map(bar=>bar.received),1);
   document.getElementById("page-dashboard").innerHTML=`
     ${pageHeader(`Good morning, ${esc((data.settings.tutorName||"Tutor").split(" ")[0])}!`,`Here's an overview of your tutoring business for ${monthName(currentMonth)}.`,`<input type="month" id="dashMonth" value="${currentMonth}" style="width:170px">`)}
     <div class="cards">
@@ -116,10 +196,10 @@ function renderDashboard(){
     </div>
     <div class="dashboard-grid">
       <div class="panel wide">
-        <div class="panel-head"><h2>Income Overview</h2><span>${monthName(currentMonth)}</span></div>
+        <div class="panel-head"><h2>Income Overview</h2><span>Received · Last 4 Months</span></div>
         <div class="metric-row"><div class="mini-metric"><small>Expected</small><strong>${money(ex)}</strong></div><div class="mini-metric"><small>Received</small><strong style="color:var(--green)">${money(rec)}</strong></div><div class="mini-metric"><small>Outstanding</small><strong style="color:var(--red)">${money(out)}</strong></div></div>
-        <div class="bar-chart">${bars.map(b=>`<div class="bar-col"><div class="bar expected" title="Expected ${money(b[1])}" style="height:${Math.max(3,Number(b[1])/max*150)}px"></div><div class="bar received" title="Received ${money(b[2])}" style="height:${Math.max(3,Number(b[2])/max*150)}px"></div></div>`).join("")}</div>
-        <div class="bar-labels">${bars.map(b=>`<span>${b[0]}</span>`).join("")}</div>
+        <div class="bar-chart">${bars.map(bar=>`<div class="bar-col"><div class="bar received" title="Received ${money(bar.received)}" style="height:${Math.max(3,bar.received/max*150)}px"></div></div>`).join("")}</div>
+        <div class="bar-labels">${bars.map(bar=>`<span>${bar.label}</span>`).join("")}</div>
       </div>
       <div class="panel">
         <div class="panel-head"><h2>Quick Actions</h2></div>
@@ -144,7 +224,7 @@ function renderDashboard(){
       </div>
     </div>
     <div class="highlight"><div class="highlight-icon">🎯</div><div><strong>${money(ex)}</strong><span> is your expected income for ${monthName(currentMonth)}.</span><small>Each student's own monthly fee is included automatically.</small></div></div>`;
-  document.getElementById("dashMonth").onchange=e=>{currentMonth=e.target.value;renderAll()};
+  document.getElementById("dashMonth").onchange=e=>changeMonth(e.target.value);
 }
 
 function renderStudents(){
@@ -177,14 +257,13 @@ function openStudentModal(id=null){
   document.getElementById("studentForm").onsubmit=e=>{
     e.preventDefault();const f=new FormData(e.target);
     const obj={name:f.get("name").trim(),grade:f.get("grade").trim(),subject:f.get("subject").trim(),fee:Number(f.get("fee")),guardian:f.get("guardian").trim(),phone:f.get("phone").trim(),status:f.get("status")};
-    if(id) Object.assign(student(id),obj); else data.students.push({id:Date.now(),...obj});
-    save();closeModal();renderAll();showToast(id?"Student updated":"Student added");
+    void mutate(()=>api(id?`/students/${id}`:"/students",{method:id?"PUT":"POST",body:JSON.stringify(obj)}),id?"Student updated":"Student added");
   };
 }
 function viewStudent(id){
   const s=student(id), grades=data.grades.filter(g=>g.studentId==id), avg=grades.length?Math.round(grades.reduce((a,g)=>a+(g.score/g.max*100),0)/grades.length):0;
   openModal(`<div class="modal-head"><div><h2>${esc(s.name)}</h2><p class="modal-sub">Grade ${esc(s.grade)} · ${esc(s.subject)} · ${money(s.fee)}/month</p></div><button class="close" onclick="closeModal()">×</button></div>
-  <div class="metric-row"><div class="mini-metric"><small>Monthly Fee</small><strong>${money(s.fee)}</strong></div><div class="mini-metric"><small>Current Average</small><strong>${avg}%</strong></div><div class="mini-metric"><small>October</small><strong>${statusFor(paymentFor(id),s)}</strong></div></div>
+  <div class="metric-row"><div class="mini-metric"><small>Monthly Fee</small><strong>${money(s.fee)}</strong></div><div class="mini-metric"><small>Current Average</small><strong>${avg}%</strong></div><div class="mini-metric"><small>${monthName(currentMonth)}</small><strong>${statusFor(paymentFor(id),s)}</strong></div></div>
   <h3>Recent Grades</h3><div class="table-wrap"><table><thead><tr><th>Term</th><th>Assessment</th><th>Score</th><th>Date</th></tr></thead><tbody>${grades.slice(-8).reverse().map(g=>`<tr><td>${esc(g.term)}</td><td>${esc(g.assessment)}</td><td>${g.score}/${g.max} (${Math.round(g.score/g.max*100)}%)</td><td>${g.date||"—"}</td></tr>`).join("")||`<tr><td colspan="4">No grades recorded.</td></tr>`}</tbody></table></div>
   <div class="modal-actions"><button class="btn" onclick="closeModal();openStudentModal(${id})">Edit Student</button><button class="btn btn-primary" onclick="closeModal();openPaymentModal(${id})">Record Payment</button></div>`);
 }
@@ -199,14 +278,14 @@ function renderGrades(){
 function openGradeModal(id=null){
   openModal(`<div class="modal-head"><div><h2>Record Grade</h2><p class="modal-sub">Add a test, assignment, exam or other assessment.</p></div><button class="close" onclick="closeModal()">×</button></div>
   <form id="gradeForm"><div class="form-grid"><div class="full"><label>Student *</label><select name="studentId" required>${data.students.map(s=>`<option value="${s.id}" ${id==s.id?"selected":""}>${esc(s.name)} — Grade ${esc(s.grade)}</option>`).join("")}</select></div><div><label>Term</label><select name="term"><option>Term 1</option><option>Term 2</option><option>Term 3</option></select></div><div><label>Assessment</label><input name="assessment" required placeholder="Test 1"></div><div><label>Score</label><input name="score" type="number" min="0" required></div><div><label>Maximum</label><input name="max" type="number" min="1" value="100" required></div><div><label>Date</label><input name="date" type="date" value="${new Date().toISOString().slice(0,10)}"></div></div><div class="modal-actions"><button type="button" class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary">Save Grade</button></div></form>`);
-  document.getElementById("gradeForm").onsubmit=e=>{e.preventDefault();const f=new FormData(e.target);data.grades.push({id:Date.now(),studentId:Number(f.get("studentId")),term:f.get("term"),assessment:f.get("assessment"),score:Number(f.get("score")),max:Number(f.get("max")),date:f.get("date")});save();closeModal();renderAll();showToast("Grade recorded")};
+  document.getElementById("gradeForm").onsubmit=e=>{e.preventDefault();const f=new FormData(e.target),grade={studentId:Number(f.get("studentId")),term:f.get("term"),assessment:f.get("assessment"),score:Number(f.get("score")),max:Number(f.get("max")),date:f.get("date")};void mutate(()=>api("/grades",{method:"POST",body:JSON.stringify(grade)}),"Grade recorded")};
 }
 function viewGrades(id){
   const s=student(id), gs=data.grades.filter(g=>g.studentId==id);
   openModal(`<div class="modal-head"><div><h2>${esc(s.name)} — Grades</h2><p class="modal-sub">Grade ${esc(s.grade)} · ${esc(s.subject)}</p></div><button class="close" onclick="closeModal()">×</button></div>
   <div class="table-wrap"><table><thead><tr><th>Term</th><th>Assessment</th><th>Score</th><th>%</th><th>Date</th><th></th></tr></thead><tbody>${gs.slice().reverse().map(g=>`<tr><td>${esc(g.term)}</td><td>${esc(g.assessment)}</td><td>${g.score}/${g.max}</td><td>${Math.round(g.score/g.max*100)}%</td><td>${g.date}</td><td><button class="btn btn-sm btn-danger" onclick="deleteGrade(${g.id},${id})">Delete</button></td></tr>`).join("")||`<tr><td colspan="6">No grades yet.</td></tr>`}</tbody></table></div><div class="modal-actions"><button class="btn btn-primary" onclick="closeModal();openGradeModal(${id})">＋ Add Grade</button></div>`);
 }
-function deleteGrade(gid,sid){data.grades=data.grades.filter(g=>g.id!=gid);save();closeModal();renderAll();viewGrades(sid);showToast("Grade deleted")}
+function deleteGrade(gid,sid){void mutate(()=>api(`/grades/${gid}`,{method:"DELETE"}),"Grade deleted",()=>{renderAll();viewGrades(sid)})}
 
 function renderPayments(){
   const ps=paymentsFor();
@@ -214,7 +293,7 @@ function renderPayments(){
   <div class="cards" style="margin-bottom:15px"><div class="card kpi green"><div class="kpi-top"><span>Expected</span><div class="kpi-icon">R</div></div><h3>${money(expected())}</h3></div><div class="card kpi blue"><div class="kpi-top"><span>Received</span><div class="kpi-icon">✓</div></div><h3>${money(received())}</h3></div><div class="card kpi red"><div class="kpi-top"><span>Outstanding</span><div class="kpi-icon">!</div></div><h3>${money(outstanding())}</h3></div><div class="card kpi orange"><div class="kpi-top"><span>Fully Paid</span><div class="kpi-icon">%</div></div><h3>${ps.filter(p=>statusFor(p,student(p.studentId))==="Paid").length}</h3></div></div>
   <div class="table-wrap"><table><thead><tr><th>Student</th><th>Fee</th><th>Paid</th><th>Balance</th><th>Status</th><th>Payment Date</th><th>Action</th></tr></thead><tbody>
   ${ps.map(p=>{const s=student(p.studentId),st=statusFor(p,s);return `<tr><td><b>${esc(s.name)}</b><br><small class="muted">Grade ${esc(s.grade)} · ${esc(s.subject)}</small></td><td>${money(s.fee)}</td><td>${money(p.amount)}</td><td>${money(Math.max(s.fee-p.amount,0))}</td><td><span class="status ${st.toLowerCase()}">${st}</span></td><td>${p.date||"—"}</td><td><button class="btn btn-sm ${st==="Paid"?"btn-success":"btn-primary"}" onclick="openPaymentModal(${s.id})">${st==="Paid"?"Edit Payment":"Mark Paid"}</button> <button class="btn btn-sm btn-whatsapp" onclick="openInvoiceModal(${s.id},'${currentMonth}')">Invoice</button></td></tr>`}).join("")}</tbody></table></div>`;
-  document.getElementById("payMonth").onchange=e=>{currentMonth=e.target.value;renderAll()};
+  document.getElementById("payMonth").onchange=e=>changeMonth(e.target.value);
 }
 function openPaymentModal(id=null){
   const month=currentMonth;
@@ -226,45 +305,45 @@ function openPaymentModal(id=null){
   const updateHint=()=>{const ss=student(sel.value);document.getElementById("feeHint").textContent=money(ss.fee)};
   sel.onchange=updateHint;
   document.getElementById("paymentForm").onsubmit=e=>{
-    e.preventDefault();const f=new FormData(e.target), sid=Number(f.get("studentId")), mon=f.get("month"), amt=Number(f.get("amount")||0), ss=student(sid), st=statusFor({amount:amt},ss);
-    let existing=data.payments.find(x=>x.studentId===sid&&x.month===mon);
-    if(existing) Object.assign(existing,{amount:amt,status:st,date:f.get("date"),note:f.get("note")});
-    else data.payments.push({id:Date.now(),studentId:sid,month:mon,amount:amt,status:st,date:f.get("date"),note:f.get("note")});
-    currentMonth=mon;save();closeModal();renderAll();showToast("Payment saved");
+    e.preventDefault();const f=new FormData(e.target), sid=Number(f.get("studentId")), mon=f.get("month"), amt=Number(f.get("amount")||0);
+    currentMonth=mon;
+    void mutate(()=>api(`/payments/${sid}/${encodeURIComponent(mon)}`,{method:"PUT",body:JSON.stringify({amount:amt,date:f.get("date"),note:f.get("note")})}),"Payment saved");
   };
 }
 
 function renderInvoices(){
   document.getElementById("page-invoices").innerHTML=`${pageHeader("Invoices","Create, print and send payment invoices through WhatsApp.",`<button class="btn btn-primary" onclick="openInvoiceModal()">＋ Create Invoice</button>`)}
-  <div class="panel"><div class="panel-head"><h2>Invoice History</h2><span>Generated invoices are stored in this browser.</span></div>
-  <div class="table-wrap"><table><thead><tr><th>Invoice</th><th>Student</th><th>Month</th><th>Amount</th><th>Status</th><th>Actions</th></tr></thead><tbody>${data.invoices.slice().reverse().map(i=>{const s=student(i.studentId);return `<tr><td><b>${i.number}</b></td><td>${esc(s?.name||"Deleted student")}</td><td>${monthName(i.month)}</td><td>${money(i.amount)}</td><td><span class="status ${i.status.toLowerCase()}">${i.status}</span></td><td><button class="btn btn-sm" onclick="previewInvoice('${i.number}')">View</button> <button class="btn btn-sm btn-whatsapp" onclick="sendWhatsApp('${i.number}')">WhatsApp</button></td></tr>`}).join("")||`<tr><td colspan="6"><div class="empty">No invoices created yet.</div></td></tr>`}</tbody></table></div></div>`;
+  <div class="panel"><div class="panel-head"><h2>Invoice History</h2><span>Invoices are stored in your account.</span></div>
+  <div class="table-wrap"><table><thead><tr><th>Invoice</th><th>Student</th><th>Month</th><th>Amount</th><th>Status</th><th>Actions</th></tr></thead><tbody>${data.invoices.slice().reverse().map(i=>`<tr><td><b>${esc(i.number)}</b></td><td>${esc(i.studentName)}</td><td>${monthName(i.month)}</td><td>${money(i.amount)}</td><td><span class="status ${i.status.toLowerCase()}">${i.status}</span></td><td><button class="btn btn-sm" onclick="previewInvoice('${i.number}')">View</button> <button class="btn btn-sm btn-whatsapp" onclick="sendWhatsApp('${i.number}')">WhatsApp</button></td></tr>`).join("")||`<tr><td colspan="6"><div class="empty">No invoices created yet.</div></td></tr>`}</tbody></table></div></div>`;
 }
-function invoiceNumber(){return "INV-"+new Date().getFullYear()+"-"+String(data.invoices.length+1).padStart(5,"0")}
 function openInvoiceModal(id=null,month=currentMonth){
   const s=id?student(id):data.students[0];
   openModal(`<div class="modal-head"><div><h2>Create Invoice</h2><p class="modal-sub">Choose the student and billing month.</p></div><button class="close" onclick="closeModal()">×</button></div>
   <form id="invoiceForm"><div class="form-grid"><div class="full"><label>Student</label><select name="studentId">${data.students.map(x=>`<option value="${x.id}" ${x.id===s?.id?"selected":""}>${esc(x.name)} — ${money(x.fee)}/month</option>`).join("")}</select></div><div><label>Billing Month</label><input type="month" name="month" value="${month}"></div><div><label>Amount</label><input name="amount" type="number" min="0" step=".01" value="${s?.fee||0}"></div></div><div class="modal-actions"><button type="button" class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary">Create Invoice</button></div></form>`);
   const sel=document.querySelector("#invoiceForm [name=studentId]"), amt=document.querySelector("#invoiceForm [name=amount]");
   sel.onchange=()=>amt.value=student(sel.value).fee;
-  document.getElementById("invoiceForm").onsubmit=e=>{e.preventDefault();const f=new FormData(e.target), sid=Number(f.get("studentId")), mon=f.get("month"), ss=student(sid), p=paymentFor(sid,mon), inv={number:invoiceNumber(),studentId:sid,month:mon,amount:Number(f.get("amount")),status:statusFor(p,ss),created:new Date().toISOString()};data.invoices.push(inv);save();closeModal();renderAll();previewInvoice(inv.number)};
+  document.getElementById("invoiceForm").onsubmit=e=>{e.preventDefault();const f=new FormData(e.target),invoice={studentId:Number(f.get("studentId")),month:f.get("month"),amount:Number(f.get("amount"))};void mutate(async()=>{const result=await api("/invoices",{method:"POST",body:JSON.stringify(invoice)});return result.invoice},"Invoice created",()=>{renderAll();previewInvoice(data.invoices[0].number)})};
 }
 function previewInvoice(num){
-  const i=data.invoices.find(x=>x.number===num);if(!i)return;const s=student(i.studentId);const p=paymentFor(i.studentId,i.month);
+  const i=data.invoices.find(x=>x.number===num);if(!i)return;const s={name:i.studentName,grade:i.grade,subject:i.subject,guardian:i.guardian};
+  const invoiceMoney=value=>`${i.currency}${Number(value||0).toLocaleString("en-ZA",{minimumFractionDigits:0,maximumFractionDigits:2})}`;
   openModal(`<div class="modal-head"><div><h2>Invoice Preview</h2><p class="modal-sub">${i.number}</p></div><button class="close" onclick="closeModal()">×</button></div>
-  <div class="invoice-preview" id="printInvoice"><div class="invoice-head"><div><div class="invoice-brand">Zayne<span>Tutor</span></div><div class="muted">Learn · Improve · Succeed</div></div><div style="text-align:right"><b>INVOICE</b><br>${i.number}<br>${monthName(i.month)}</div></div>
+  <div class="invoice-preview" id="printInvoice"><div class="invoice-head"><div><div class="invoice-brand">${esc(i.businessName)}</div><div class="muted">Learn · Improve · Succeed</div></div><div style="text-align:right"><b>INVOICE</b><br>${i.number}<br>${monthName(i.month)}</div></div>
   <p><b>Student:</b> ${esc(s.name)}<br><b>Grade:</b> ${esc(s.grade)}<br><b>Subject:</b> ${esc(s.subject)}<br><b>Parent/Guardian:</b> ${esc(s.guardian||"—")}</p>
-  <div class="table-wrap"><table><thead><tr><th>Description</th><th>Amount</th></tr></thead><tbody><tr><td>${monthName(i.month)} Tuition</td><td>${money(i.amount)}</td></tr></tbody></table></div>
-  <div class="invoice-total">TOTAL: ${money(i.amount)}<div><span class="status ${i.status.toLowerCase()}">${i.status}</span></div></div>
-  <p class="muted" style="margin-top:30px">Thank you for choosing ZayneTutor.</p></div>
+  <div class="table-wrap"><table><thead><tr><th>Description</th><th>Amount</th></tr></thead><tbody><tr><td>${monthName(i.month)} Tuition</td><td>${invoiceMoney(i.amount)}</td></tr></tbody></table></div>
+  <div class="invoice-total">TOTAL: ${invoiceMoney(i.amount)}<div><span class="status ${i.status.toLowerCase()}">${i.status}</span></div></div>
+  <p class="muted" style="margin-top:30px">Thank you for choosing ${esc(i.businessName)}.</p></div>
   <div class="modal-actions"><button class="btn" onclick="printInvoice('${i.number}')">Print / Save PDF</button><button class="btn btn-whatsapp" onclick="sendWhatsApp('${i.number}')">Send via WhatsApp</button></div>`);
 }
 function printInvoice(num){
-  const i=data.invoices.find(x=>x.number===num),s=student(i.studentId);
-  const w=window.open("","_blank");w.document.write(`<html><head><title>${i.number}</title><style>body{font-family:Arial;padding:40px;color:#16213b}table{width:100%;border-collapse:collapse;margin-top:25px}th,td{padding:12px;border:1px solid #ddd;text-align:left}.brand{font-size:28px;font-weight:bold;color:#053199}.brand span{color:#ffb000}.total{text-align:right;font-size:22px;font-weight:bold;margin-top:25px}</style></head><body><div class="brand">Zayne<span>Tutor</span></div><h2>INVOICE</h2><p><b>${i.number}</b><br>${monthName(i.month)}</p><p><b>Student:</b> ${esc(s.name)}<br><b>Grade:</b> ${esc(s.grade)}<br><b>Subject:</b> ${esc(s.subject)}</p><table><tr><th>Description</th><th>Amount</th></tr><tr><td>${monthName(i.month)} Tuition</td><td>${money(i.amount)}</td></tr></table><div class="total">TOTAL: ${money(i.amount)}<br>${i.status}</div></body></html>`);w.document.close();w.print();
+  const i=data.invoices.find(x=>x.number===num);if(!i)return;
+  const invoiceMoney=value=>`${i.currency}${Number(value||0).toLocaleString("en-ZA",{minimumFractionDigits:0,maximumFractionDigits:2})}`;
+  const w=window.open("","_blank");if(!w){showToast("Allow pop-ups to print this invoice.");return}
+  w.document.write(`<html><head><title>${esc(i.number)}</title><style>body{font-family:Arial;padding:40px;color:#16213b}table{width:100%;border-collapse:collapse;margin-top:25px}th,td{padding:12px;border:1px solid #ddd;text-align:left}.brand{font-size:28px;font-weight:bold;color:#053199}.total{text-align:right;font-size:22px;font-weight:bold;margin-top:25px}</style></head><body><div class="brand">${esc(i.businessName)}</div><h2>INVOICE</h2><p><b>${esc(i.number)}</b><br>${monthName(i.month)}</p><p><b>Student:</b> ${esc(i.studentName)}<br><b>Grade:</b> ${esc(i.grade)}<br><b>Subject:</b> ${esc(i.subject)}</p><table><tr><th>Description</th><th>Amount</th></tr><tr><td>${monthName(i.month)} Tuition</td><td>${invoiceMoney(i.amount)}</td></tr></table><div class="total">TOTAL: ${invoiceMoney(i.amount)}<br>${i.status}</div></body></html>`);w.document.close();w.print();
 }
 function sendWhatsApp(num){
-  const i=data.invoices.find(x=>x.number===num),s=student(i.studentId);if(!s.phone){showToast("Add a WhatsApp number for this student first.");return}
-  const clean=s.phone.replace(/[^\d]/g,"");const msg=`Hello ${s.guardian||""}, thank you for choosing ${data.settings.businessName}. Your ${monthName(i.month)} tuition invoice (${i.number}) for ${s.name} is ${money(i.amount)}. Payment status: ${i.status}. Thank you.`;
+  const i=data.invoices.find(x=>x.number===num),s=student(i.studentId);if(!s?.phone){showToast("Add a WhatsApp number for this student first.");return}
+  const clean=s.phone.replace(/[^\d]/g,"");const msg=`Hello ${i.guardian||""}, thank you for choosing ${i.businessName}. Your ${monthName(i.month)} tuition invoice (${i.number}) for ${i.studentName} is ${i.currency}${i.amount}. Payment status: ${i.status}. Thank you.`;
   window.open(`https://wa.me/${clean}?text=${encodeURIComponent(msg)}`,"_blank");
 }
 function renderReports(){
@@ -276,25 +355,25 @@ function renderReports(){
 }
 function exportCSV(){
   const rows=[["Student","Month","Fee","Paid","Balance","Status"]];
-  data.payments.forEach(p=>{const s=student(p.studentId);if(s)rows.push([s.name,p.month,s.fee,p.amount,Math.max(s.fee-p.amount,0),statusFor(p,s)])});
+  data.paymentHistory.forEach(p=>rows.push([p.name,p.month,p.fee,p.amount,Math.max(p.fee-p.amount,0),p.status]));
   const csv=rows.map(r=>r.map(v=>`"${String(v).replaceAll('"','""')}"`).join(",")).join("\n");
   const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([csv],{type:"text/csv"}));a.download="zaynetutor-payments.csv";a.click();URL.revokeObjectURL(a.href);
 }
 function renderSettings(){
   const s=data.settings;
   document.getElementById("page-settings").innerHTML=`${pageHeader("Settings","Update your tutor and business details.",`<button class="btn btn-primary" onclick="saveSettings()">Save Settings</button>`)}
-  <div class="settings-grid"><div class="panel"><h2>Business Details</h2><p class="muted">These details appear on invoices.</p><div class="form-grid" style="margin-top:18px"><div><label>Business Name</label><input id="setBusiness" value="${esc(s.businessName)}"></div><div><label>Tutor Name</label><input id="setTutor" value="${esc(s.tutorName)}"></div><div><label>WhatsApp / Phone</label><input id="setPhone" value="${esc(s.phone)}"></div><div><label>Email</label><input id="setEmail" value="${esc(s.email)}"></div><div><label>Currency Symbol</label><input id="setCurrency" value="${esc(s.currency)}"></div></div></div>
-  <div class="panel danger-zone"><h2>Data</h2><p class="muted">This version stores data in your browser using localStorage.</p><button class="btn btn-danger" onclick="resetDemo()">Reset Demo Data</button><p class="muted" style="font-size:11px;margin-top:12px">For a real production system with multiple devices and secure backups, connect this interface to Node.js + MySQL.</p></div></div>`;
+  <div class="settings-grid"><div class="panel"><h2>Business Details</h2><p class="muted">These details appear on invoices.</p><div class="form-grid" style="margin-top:18px"><div><label>Business Name</label><input id="setBusiness" value="${esc(s.businessName)}"></div><div><label>Tutor Name</label><input id="setTutor" value="${esc(s.tutorName)}"></div><div><label>WhatsApp / Phone</label><input id="setPhone" value="${esc(s.phone)}"></div><div><label>Account Email (read-only)</label><input id="setEmail" type="email" value="${esc(s.email)}" readonly></div><div><label>Currency Symbol</label><input id="setCurrency" value="${esc(s.currency)}"></div></div></div>
+  <div class="panel danger-zone"><h2>Account Data</h2><p class="muted">Your students, payments, grades, invoices, and business settings are stored in the connected MySQL database and scoped to your tutor account.</p><p class="muted" style="font-size:11px;margin-top:12px">Database backups are managed by your hosting provider. Sign out on shared devices.</p></div></div>`;
 }
 function saveSettings(){
-  data.settings.businessName=document.getElementById("setBusiness").value.trim()||"ZayneTutor";
-  data.settings.tutorName=document.getElementById("setTutor").value.trim()||"Tutor";
-  data.settings.phone=document.getElementById("setPhone").value.trim();
-  data.settings.email=document.getElementById("setEmail").value.trim();
-  data.settings.currency=document.getElementById("setCurrency").value.trim()||"R";
-  save();renderAll();showToast("Settings saved");
+  const settings={
+    businessName:document.getElementById("setBusiness").value.trim(),
+    tutorName:document.getElementById("setTutor").value.trim(),
+    phone:document.getElementById("setPhone").value.trim(),
+    currency:document.getElementById("setCurrency").value.trim(),
+  };
+  void mutate(()=>api("/settings",{method:"PUT",body:JSON.stringify(settings)}),"Settings saved",()=>renderAll());
 }
-function resetDemo(){if(confirm("Reset all demo data? This cannot be undone.")){data=structuredClone(defaultData);save();renderAll();showToast("Demo data restored")}}
 function navigate(page){
   currentPage=page;
   document.querySelectorAll(".page").forEach(x=>x.classList.remove("active"));
@@ -310,4 +389,7 @@ document.getElementById("globalSearch").oninput=e=>{
   const q=e.target.value.trim(); if(q){navigate("students");const input=document.getElementById("studentSearch");if(input){input.value=q;filterStudents()}}
 };
 document.getElementById("notificationBtn").onclick=()=>navigate("payments");
-renderAll();
+document.getElementById("authForm").addEventListener("submit",submitAuth);
+document.getElementById("authToggle").onclick=updateAuthMode;
+document.getElementById("signOut").onclick=signOut;
+initializeApp();

@@ -194,6 +194,24 @@ router.delete("/grades/:gradeId", asyncHandler(async (req, res) => {
   res.status(204).end();
 }));
 
+router.get("/payments/history", asyncHandler(async (req, res) => {
+  const [rows] = await pool.execute(
+    `SELECT p.id, p.student_id AS studentId, p.billing_month AS month, s.name,
+            s.monthly_fee AS fee, p.amount,
+            DATE_FORMAT(p.payment_date, '%Y-%m-%d') AS date, p.note
+     FROM payments p
+     JOIN students s ON s.id = p.student_id
+     WHERE p.tutor_id = ?
+     ORDER BY p.billing_month DESC, p.payment_date DESC, p.id DESC`,
+    [req.tutorId],
+  );
+  const payments = numericRows(rows, ["id", "studentId", "fee", "amount"]).map((row) => ({
+    ...row,
+    status: paymentStatus(row.amount, row.fee),
+  }));
+  res.json({ payments });
+}));
+
 router.get("/payments", asyncHandler(async (req, res) => {
   const { month } = z.object({ month: monthSchema }).parse(req.query);
   const [rows] = await pool.execute(
